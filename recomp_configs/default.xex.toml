@@ -1,0 +1,16 @@
+[main]
+file_path = "../../extracted_game/root/default.xex"
+out_directory_path = "default.xex"
+switch_table_file_path = "default.xex_switch_tables.toml"
+
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+savegprlr_14_address = 0x82014110
+restgprlr_14_address = 0x82014160

@@ -1,0 +1,16 @@
+[main]
+file_path = "../../extracted_game/root/bin/datacache_360.dll"
+out_directory_path = "datacache_360"
+switch_table_file_path = "datacache_360_switch_tables.toml"
+
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+savegprlr_14_address = 0x82E3BB60
+restgprlr_14_address = 0x82E3BBB0

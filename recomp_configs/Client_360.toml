@@ -1,0 +1,16 @@
+[main]
+file_path = "../../extracted_game/root/left4dead/bin/Client_360.dll"
+out_directory_path = "Client_360"
+switch_table_file_path = "Client_360_switch_tables.toml"
+
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+savegprlr_14_address = 0x87EA5A50
+restgprlr_14_address = 0x87EA5AA0

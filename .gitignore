@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# The ~480 MB generated recompiled sources - generate with XenonRecomp
+**/ppc_recomp.*.cpp
+**/ppc_func_mapping.cpp
+**/ppc_recomp_shared.h
+
+# PE section dumps (binary, large)
+analysis/pe_dumps/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Python
+__pycache__/
+*.pyc

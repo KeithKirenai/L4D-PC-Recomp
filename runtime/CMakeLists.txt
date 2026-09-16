@@ -43,6 +43,8 @@ set(ALL_RECOMP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_unified_dispatch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_kernel_stubs.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_kernel_stubs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/l4d_cross_module_links.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/l4d_cross_module_links.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_boot.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_boot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/l4d_autogen_stubs.cpp"

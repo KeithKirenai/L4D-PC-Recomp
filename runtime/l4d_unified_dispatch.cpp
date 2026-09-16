@@ -155,9 +155,21 @@ bool L4D_PreloadAllPEData(uint8_t* guestBase, const std::string& peDumpsDir)
                 uint32_t rawSize = *(uint32_t*)&peData[sOff + 16];
                 uint32_t rawPtr = *(uint32_t*)&peData[sOff + 20];
 
-                if (rawPtr + rawSize <= peData.size() && rawSize > 0) {
+                // Note: These PE dumps are unpacked virtual memory images where section
+                // content is laid out at virtAddr (VirtualAddress), not rawPtr.
+                uint32_t srcOff = virtAddr;
+                uint32_t copySize = (rawSize > 0) ? rawSize : virtSize;
+                if (srcOff + copySize > peData.size()) {
+                    if (srcOff < peData.size()) {
+                        copySize = (uint32_t)(peData.size() - srcOff);
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (copySize > 0) {
                     uint8_t* dest = guestBase + imageBase + virtAddr;
-                    memcpy(dest, &peData[rawPtr], rawSize);
+                    memcpy(dest, &peData[srcOff], copySize);
                 }
             }
 

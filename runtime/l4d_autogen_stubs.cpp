@@ -828,6 +828,10 @@ extern "C" void __imp__XeKeysGetKey(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void __imp__XexGetModuleHandle(PPCContext& ctx, uint8_t* base) {
+    if (ctx.r4.u32 != 0) {
+        uint32_t valBe = __builtin_bswap32(0x82000000u);
+        memcpy(base + ctx.r4.u32, &valBe, 4);
+    }
     ctx.r3.u64 = 0;
 }
 

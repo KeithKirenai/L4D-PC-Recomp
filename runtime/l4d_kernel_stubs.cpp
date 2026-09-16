@@ -279,21 +279,45 @@ static std::atomic<uint32_t> s_vmNextAlloc{0xA0100000u};
 
 PPC_FUNC_IMPL(__imp__NtAllocateVirtualMemory)
 {
-    uint32_t baseAddrPtrGva  = ctx.r4.u32;
-    uint32_t regionSizePtrGva = ctx.r6.u32;
+    uint32_t baseAddrPtrGva   = ctx.r3.u32;
+    uint32_t regionSizePtrGva = ctx.r4.u32;
+    uint32_t allocType        = ctx.r5.u32;
+    uint32_t protect          = ctx.r6.u32;
 
+    uint32_t requestedBase = baseAddrPtrGva ? GuestU32(base, baseAddrPtrGva) : 0;
     uint32_t requestedSize = regionSizePtrGva ? GuestU32(base, regionSizePtrGva) : 0;
     if (requestedSize == 0) requestedSize = 0x10000;
     uint32_t aligned = (requestedSize + 0xFFFFu) & ~0xFFFFu;
-    uint32_t gva = s_vmNextAlloc.fetch_add(aligned);
 
-    if (baseAddrPtrGva)  WriteGuestU32(base, baseAddrPtrGva, gva);
+    uint32_t gva = requestedBase;
+    if (gva == 0) {
+        gva = s_vmNextAlloc.fetch_add(aligned);
+    }
+
+    if (baseAddrPtrGva)   WriteGuestU32(base, baseAddrPtrGva, gva);
     if (regionSizePtrGva) WriteGuestU32(base, regionSizePtrGva, aligned);
     ctx.r3.u64 = STATUS_SUCCESS;
 }
 
 PPC_FUNC_IMPL(__imp__NtFreeVirtualMemory)    { ctx.r3.u64 = STATUS_SUCCESS; }
-PPC_FUNC_IMPL(__imp__NtQueryVirtualMemory)   { ctx.r3.u64 = STATUS_NOT_IMPLEMENTED; }
+
+PPC_FUNC_IMPL(__imp__NtQueryVirtualMemory)
+{
+    uint32_t queryAddr = ctx.r3.u32;
+    uint32_t mbiGva    = ctx.r4.u32;
+
+    if (mbiGva) {
+        uint32_t baseAddr = queryAddr & ~0xFFFFu;
+        WriteGuestU32(base, mbiGva + 0,  baseAddr);       // BaseAddress
+        WriteGuestU32(base, mbiGva + 4,  baseAddr);       // AllocationBase
+        WriteGuestU32(base, mbiGva + 8,  0x04);           // AllocationProtect (PAGE_READWRITE)
+        WriteGuestU32(base, mbiGva + 12, 0x100000);       // RegionSize (1MB)
+        WriteGuestU32(base, mbiGva + 16, 0x1000);         // State (MEM_COMMIT)
+        WriteGuestU32(base, mbiGva + 20, 0x04);           // Protect (PAGE_READWRITE)
+        WriteGuestU32(base, mbiGva + 24, 0x20000);        // Type (MEM_PRIVATE)
+    }
+    ctx.r3.u64 = STATUS_SUCCESS;
+}
 
 // ---------------------------------------------------------------------------
 // Rtl* stubs
@@ -353,12 +377,14 @@ PPC_FUNC_IMPL(__imp__RtlRaiseException)
 // ---------------------------------------------------------------------------
 PPC_FUNC_IMPL(__imp__KeBugCheck)
 {
-    fprintf(stderr, "[KeBugCheck] code=0x%08X\n", ctx.r3.u32);
+    fprintf(stderr, "[KeBugCheck] code=0x%08X lr=0x%08llX r4=0x%08llX r5=0x%08llX\n",
+            ctx.r3.u32, (unsigned long long)ctx.lr, (unsigned long long)ctx.r4.u64, (unsigned long long)ctx.r5.u64);
     abort();
 }
 PPC_FUNC_IMPL(__imp__KeBugCheckEx)
 {
-    fprintf(stderr, "[KeBugCheckEx] code=0x%08X\n", ctx.r3.u32);
+    fprintf(stderr, "[KeBugCheckEx] code=0x%08X lr=0x%08llX r4=0x%08llX r5=0x%08llX\n",
+            ctx.r3.u32, (unsigned long long)ctx.lr, (unsigned long long)ctx.r4.u64, (unsigned long long)ctx.r5.u64);
     abort();
 }
 PPC_FUNC_IMPL(__imp__KeGetCurrentProcessType) { ctx.r3.u64 = 2; }  // ProcessTypeTitle

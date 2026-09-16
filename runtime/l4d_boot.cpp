@@ -13,6 +13,7 @@
 #include "l4d_pch.h"
 #include "l4d_unified_dispatch.h"
 #include "l4d_kernel_stubs.h"
+#include "l4d_cross_module_links.h"
 #include "l4d_boot.h"
 
 #include <cstdio>
@@ -116,6 +117,21 @@ static void InitGuestThreadContext(PPCContext& ctx)
     ctx.fpscr.loadFromHost();
 }
 
+// Strong function overrides for default.xex direct C++ calls
+extern "C" void __imp__sub_82011B38(PPCContext& ctx, uint8_t* base) {
+    printf("[Hook:__imp__sub_82011B38] Direct call Security Header -> BYPASSED (returning 1)\n");
+    ctx.r3.u64 = 1;
+}
+
+extern "C" void __imp__sub_82011320(PPCContext& ctx, uint8_t* base) {
+    printf("[Hook:__imp__sub_82011320] Direct call Console Privilege -> BYPASSED (returning 0)\n");
+    ctx.r3.u64 = 0;
+}
+
+extern "C" void __imp__sub_82011A60(PPCContext& ctx, uint8_t* base) {
+    // Empty CRT _initterm
+}
+
 // ---------------------------------------------------------------------------
 // L4D_Boot
 // ---------------------------------------------------------------------------
@@ -152,6 +168,10 @@ bool L4D_Boot(const std::string& peDumpsDir)
     printf("[Boot] Registering kernel stubs...\n");
     L4D_RegisterKernelStubs();
 
+    // ── 4a. Setup automated cross-module links ────────────────────────────────
+    printf("[Boot] Setting up automated cross-module links across 21 modules...\n");
+    L4D_SetupCrossModuleLinks(g_memory.base);
+
     // ── 4b. Boot Security & Title Hooks ──────────────────────────────────────
     // sub_82011B38: Xbox 360 security header validation check. Must return 1 (success) to avoid HalReturnToFirmware.
     g_memory.InsertFunction(0x82011B38u, [](PPCContext& ctx, uint8_t* base) {
@@ -169,130 +189,6 @@ bool L4D_Boot(const std::string& peDumpsDir)
     // causing an infinite loop calling 0x0. Bypass empty CRT static initializers.
     g_memory.InsertFunction(0x82011A60u, [](PPCContext& ctx, uint8_t* base) {
         printf("[Hook:sub_82011A60] CRT static initializers -> BYPASSED\n");
-    });
-
-    // ── 4c. Launcher & Tier0 Cross-Module Import Thunk Hooks ──────────────────
-    // In launcher_360.dll, cross-module calls to tier0_360.dll are routed via thunks:
-    //   - sub_8322DF88: SpewOutputFunc()
-    //   - sub_8322DF78: Plat_GetCommandLine()
-    //   - sub_8322DE38: CommandLine() returning ICommandLine*
-    g_memory.InsertFunction(0x8322DF88u, [](PPCContext& ctx, uint8_t* base) {
-        printf("[Hook:SpewOutputFunc (0x8322DF88)] spew_fn=0x%08X\n", ctx.r3.u32);
-        ctx.r3.u64 = 0;
-    });
-
-    g_memory.InsertFunction(0x8322DF78u, [](PPCContext& ctx, uint8_t* base) {
-        // Return 1 so LauncherMain proceeds
-        printf("[Hook:Plat_GetCommandLine (0x8322DF78)] -> 1\n");
-        ctx.r3.u64 = 1;
-    });
-
-    // Set up mock ICommandLine and IMemAlloc in safe guest memory arena (0x8AE00000)
-    // Structure of ICommandLine vtable:
-    // [0] (destructor)
-    // [1] CreateCmdLine(const char* commandline)
-    // [2] CreateCmdLine(int argc, char** argv)
-    // [3] CheckParm(const char* psz, const char** ppszValue = 0)
-    // [4] RemoveParm(const char* psz)
-    // [5] AppendParm(const char* psz, const char* pValues)
-    // [6] GetCmdLine()
-    // [7] ParmCount()
-    // [8] FindParm(const char* psz)
-    // [9] GetParm(int nIndex)
-    // [10] CheckParm(const char* psz, const char** ppszValue = 0)
-    static const uint32_t CMDLINE_VTABLE_GVA   = 0x8AE00000u;
-    static const uint32_t CMDLINE_INSTANCE_GVA = 0x8AE00200u;
-    static const uint32_t FN_CREATE_CMDLINE    = 0x8AE00300u;
-    static const uint32_t FN_CHECK_PARM        = 0x8AE00310u;
-    static const uint32_t FN_FIND_PARM         = 0x8AE00320u;
-
-    // Write instance pointer -> vtable
-    uint32_t vtableBe = __builtin_bswap32(CMDLINE_VTABLE_GVA);
-    memcpy(g_memory.base + CMDLINE_INSTANCE_GVA, &vtableBe, 4);
-
-    // Populate vtable with stub GVAs (64 entries)
-    for (int idx = 0; idx < 64; ++idx) {
-        uint32_t targetGva = (idx == 1) ? FN_CREATE_CMDLINE :
-                             (idx == 3 || idx == 10) ? FN_CHECK_PARM :
-                             (idx == 8) ? FN_FIND_PARM : FN_CHECK_PARM;
-        uint32_t targetBe = __builtin_bswap32(targetGva);
-        memcpy(g_memory.base + CMDLINE_VTABLE_GVA + (idx * 4), &targetBe, 4);
-    }
-
-    // Register handlers for the mock ICommandLine vtable functions:
-    g_memory.InsertFunction(FN_CREATE_CMDLINE, [](PPCContext& ctx, uint8_t* base) {
-        const char* cmdline = (const char*)(base + ctx.r4.u32);
-        printf("[ICommandLine::CreateCmdLine] cmdline=\"%s\"\n", cmdline ? cmdline : "(null)");
-        ctx.r3.u64 = 0;
-    });
-
-    g_memory.InsertFunction(FN_CHECK_PARM, [](PPCContext& ctx, uint8_t* base) {
-        const char* psz = (const char*)(base + ctx.r4.u32);
-        printf("[ICommandLine::CheckParm] psz=\"%s\" -> 0 (not found)\n", psz ? psz : "(null)");
-        ctx.r3.u64 = 0;
-    });
-
-    g_memory.InsertFunction(FN_FIND_PARM, [](PPCContext& ctx, uint8_t* base) {
-        const char* psz = (const char*)(base + ctx.r4.u32);
-        printf("[ICommandLine::FindParm] psz=\"%s\" -> 0 (not found)\n", psz ? psz : "(null)");
-        ctx.r3.u64 = 0;
-    });
-
-    // sub_8322DE38 returns ICommandLine* in r3
-    g_memory.InsertFunction(0x8322DE38u, [](PPCContext& ctx, uint8_t* base) {
-        ctx.r3.u64 = CMDLINE_INSTANCE_GVA;
-    });
-
-    // Set up mock IMemAlloc (g_pMemAlloc) in guest memory
-    static const uint32_t MEMALLOC_PTR_GVA      = 0x8AE00400u;
-    static const uint32_t MEMALLOC_INSTANCE_GVA = 0x8AE00410u;
-    static const uint32_t MEMALLOC_VTABLE_GVA   = 0x8AE00500u;
-    static const uint32_t FN_MEMALLOC_ALLOC     = 0x8AE00700u;
-    static const uint32_t FN_MEMALLOC_FREE      = 0x8AE00710u;
-
-    // 0x83200430 -> &g_pMemAlloc (MEMALLOC_PTR_GVA)
-    uint32_t ptrBe = __builtin_bswap32(MEMALLOC_PTR_GVA);
-    memcpy(g_memory.base + 0x83200430u, &ptrBe, 4);
-
-    // MEMALLOC_PTR_GVA -> g_pMemAlloc (MEMALLOC_INSTANCE_GVA)
-    uint32_t instBe = __builtin_bswap32(MEMALLOC_INSTANCE_GVA);
-    memcpy(g_memory.base + MEMALLOC_PTR_GVA, &instBe, 4);
-
-    // MEMALLOC_INSTANCE_GVA -> MEMALLOC_VTABLE_GVA
-    uint32_t vtBe = __builtin_bswap32(MEMALLOC_VTABLE_GVA);
-    memcpy(g_memory.base + MEMALLOC_INSTANCE_GVA, &vtBe, 4);
-
-    // Populate MemAlloc vtable (64 entries):
-    // [0] (destructor)
-    // [1] Alloc(size_t nSize)
-    // [2] Realloc(void* pMem, size_t nSize)
-    // [3] Free(void* pMem)
-    // [4] GetSize(void* pMem)
-    for (int idx = 0; idx < 64; ++idx) {
-        uint32_t fnGva = (idx == 1) ? FN_MEMALLOC_ALLOC :
-                         (idx == 3) ? FN_MEMALLOC_FREE : FN_MEMALLOC_ALLOC;
-        uint32_t fnBe = __builtin_bswap32(fnGva);
-        memcpy(g_memory.base + MEMALLOC_VTABLE_GVA + (idx * 4), &fnBe, 4);
-    }
-
-    // Dynamic guest heap pointer in guest memory (0x8AF00000)
-    static uint32_t s_guestHeapPtr = 0x8AF00000u;
-
-    // Register IMemAlloc::Alloc handler:
-    // r3 = this, r4 = size (or r4 = size_t nSize)
-    g_memory.InsertFunction(FN_MEMALLOC_ALLOC, [](PPCContext& ctx, uint8_t* base) {
-        uint32_t size = ctx.r4.u32;
-        if (size == 0) size = 16;
-        // 16-byte align
-        size = (size + 15) & ~15u;
-        uint32_t allocatedGva = s_guestHeapPtr;
-        s_guestHeapPtr += size;
-        memset(base + allocatedGva, 0, size);
-        ctx.r3.u64 = allocatedGva;
-    });
-
-    g_memory.InsertFunction(FN_MEMALLOC_FREE, [](PPCContext& ctx, uint8_t* base) {
-        ctx.r3.u64 = 0;
     });
 
     // CAppSystemGroup / Subsystem initialization hooks:
@@ -318,24 +214,47 @@ bool L4D_Boot(const std::string& peDumpsDir)
     PPCContext ctx{};
     InitGuestThreadContext(ctx);
 
-    // ── 6. Verify _xstart is registered ─────────────────────────────────────
-    static constexpr uint32_t XSTART_GVA = 0x82011508u;
-    PPCFunc* xstart = g_memory.FindFunction(XSTART_GVA);
-    if (!xstart) {
+    // ── 5a. Module static initializers / DllMain ────────────────────────────
+    printf("[Boot] Initializing tier0_360 via DllMain (0x8279F888)...\n");
+    PPCFunc* tier0DllMain = g_memory.FindFunction(0x8279F888u);
+    if (tier0DllMain) {
+        ctx.r3.u64 = 0x82780000u; // hinstDLL
+        ctx.r4.u64 = 1;          // DLL_PROCESS_ATTACH
+        ctx.r5.u64 = 0;          // lpReserved
+        tier0DllMain(ctx, g_memory.base);
+        printf("[Boot] tier0_360 DllMain returned r3 = 0x%08X\n", ctx.r3.u32);
+        uint32_t cmdlineVtable = __builtin_bswap32(*(uint32_t*)(g_memory.base + 0x827C00D8));
+        uint32_t crtHeap = __builtin_bswap32(*(uint32_t*)(g_memory.base + 0x827CB9F8));
+        printf("[Boot] CommandLine singleton @ 0x827C00D8 vtable = 0x%08X, crtHeap = 0x%08X\n", cmdlineVtable, crtHeap);
+    } else {
+        printf("[Boot] WARN: tier0 DllMain (0x8279F888) not found in dispatch table!\n");
+    }
+
+    // ── 6. Verify and Jump into LauncherMain ───────────────────────────────
+    static constexpr uint32_t LAUNCHER_MAIN_GVA = 0x83214180u;
+    PPCFunc* launcherMain = g_memory.FindFunction(LAUNCHER_MAIN_GVA);
+    if (!launcherMain) {
         fprintf(stderr,
-            "[Boot] FATAL: _xstart (0x%08X) missing from dispatch table!\n"
+            "[Boot] FATAL: LauncherMain (0x%08X) missing from dispatch table!\n"
             "       Check that L4D_InitUnifiedDispatchTable() ran successfully.\n",
-            XSTART_GVA);
+            LAUNCHER_MAIN_GVA);
         return false;
     }
-    printf("[Boot] _xstart @ 0x%08X -> host fn %p\n\n", XSTART_GVA, (void*)xstart);
+    printf("[Boot] LauncherMain @ 0x%08X -> host fn %p\n\n", LAUNCHER_MAIN_GVA, (void*)launcherMain);
     fflush(stdout);
 
-    // ── 6. Jump! ─────────────────────────────────────────────────────────────
-    xstart(ctx, g_memory.base);
+    // Setup LauncherMain args: r3 = hInstance, r4 = hPrevInstance, r5 = lpCmdLine, r6 = nCmdShow
+    ctx.r3.u64 = 0x83200000u;
+    ctx.r4.u64 = 0;
+    static const uint32_t CMDLINE_STR_GVA = 0x8AE02000u;
+    const char* defaultCmdline = "-game left4dead -novid";
+    strcpy((char*)(g_memory.base + CMDLINE_STR_GVA), defaultCmdline);
+    ctx.r5.u64 = CMDLINE_STR_GVA;
+    ctx.r6.u64 = 1;
 
-    printf("\n[Boot] _xstart returned (r3 = 0x%08X)\n", ctx.r3.u32);
+    // ── 7. Jump! ─────────────────────────────────────────────────────────────
+    launcherMain(ctx, g_memory.base);
+
+    printf("\n[Boot] LauncherMain returned (r3 = 0x%08X)\n", ctx.r3.u32);
     return true;
 }
-
-

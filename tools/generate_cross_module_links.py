@@ -293,6 +293,9 @@ def main():
 // Resolves all cross-module imports across all 21 Xbox 360 modules,
 // populates guest memory IAT entries, and updates g_l4dGlobalDispatchTable.
 void L4D_SetupCrossModuleLinks(uint8_t* guestBase);
+
+// Resolves an exported symbol address for a module by its load base and ordinal
+uint32_t L4D_GetModuleExport(uint32_t handle, uint32_t ordinal);
 """)
 
     with open(cpp_path, "w", encoding="utf-8") as f:
@@ -337,6 +340,30 @@ static const CrossModuleLink g_crossModuleLinks[] = {
 
         f.write(f"""}};
 
+struct ModuleExportEntry {{
+    uint32_t handle;
+    uint32_t ordinal;
+    uint32_t gva;
+}};
+
+static const ModuleExportEntry g_moduleExports[] = {{
+""")
+        for clean, exps in sorted(module_exports.items()):
+            h = module_load_addrs[clean]
+            for ord_num, gva in sorted(exps.items()):
+                f.write(f"    {{ 0x{h:08X}u, {ord_num}u, 0x{gva:08X}u }},\n")
+
+        f.write(f"""}};
+
+uint32_t L4D_GetModuleExport(uint32_t handle, uint32_t ordinal) {{
+    for (const auto& exp : g_moduleExports) {{
+        if (exp.handle == handle && exp.ordinal == ordinal) {{
+            return exp.gva;
+        }}
+    }}
+    return 0;
+}}
+
 static inline void WriteGuestU32(uint8_t* base, uint32_t gva, uint32_t val) {{
     val = __builtin_bswap32(val);
     memcpy(base + gva, &val, 4);
@@ -372,11 +399,6 @@ void L4D_SetupCrossModuleLinks(uint8_t* guestBase) {{
     print(f"[5/5] Done! Generated:")
     print(f"  {header_path}")
     print(f"  {cpp_path}")
-
-    # Copy this script to tools/generate_cross_module_links.py
-    dest = os.path.join(REPO_ROOT, "tools", "generate_cross_module_links.py")
-    shutil.copy(__file__, dest)
-    print(f"Copied generator to: {dest}")
 
 if __name__ == "__main__":
     main()

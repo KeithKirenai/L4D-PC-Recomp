@@ -230,6 +230,38 @@ bool L4D_Boot(const std::string& peDumpsDir)
         printf("[Boot] WARN: tier0 DllMain (0x8279F888) not found in dispatch table!\n");
     }
 
+    // Initialize FileSystem_Stdio_360 via entry point / DllMain (0x82BCF5B8)
+    printf("[Boot] Initializing FileSystem_Stdio_360 via DllMain (0x82BCF5B8)...\n");
+    PPCFunc* fsDllMain = g_memory.FindFunction(0x82BCF5B8u);
+    if (fsDllMain) {
+        ctx.r3.u64 = 0x82B80000u; // hinstDLL
+        ctx.r4.u64 = 1;          // DLL_PROCESS_ATTACH
+        ctx.r5.u64 = 0;          // lpReserved
+        fsDllMain(ctx, g_memory.base);
+        printf("[Boot] FileSystem_Stdio_360 DllMain returned r3 = 0x%08X\n", ctx.r3.u32);
+    } else {
+        printf("[Boot] WARN: FileSystem_Stdio DllMain (0x82BCF5B8) not found in dispatch table!\n");
+    }
+
+    // Verify CreateInterface @ 0x82BCAFD8
+    PPCFunc* fsCreateInterface = g_memory.FindFunction(0x82BCAFD8u);
+    if (fsCreateInterface) {
+        static const uint32_t FS_NAME_GVA = 0x8AE01000u;
+        strcpy((char*)(g_memory.base + FS_NAME_GVA), "VFileSystem017");
+        ctx.r3.u64 = FS_NAME_GVA;
+        ctx.r4.u64 = 0;
+        fsCreateInterface(ctx, g_memory.base);
+        uint32_t pFileSystem = ctx.r3.u32;
+        printf("[Boot] FileSystem CreateInterface(\"VFileSystem017\") -> 0x%08X\n", pFileSystem);
+        if (pFileSystem != 0) {
+            uint32_t vtable = __builtin_bswap32(*(uint32_t*)(g_memory.base + pFileSystem));
+            printf("[Boot] VFileSystem017 vtable = 0x%08X\n", vtable);
+            // Wire *g_pFileSystemModule @ 0x827CB460 to this interface
+            WriteGuestU32(g_memory.base, 0x827CB460u, pFileSystem);
+            printf("[Boot] *g_pFileSystemModule @ 0x827CB460 wired to 0x%08X\n", pFileSystem);
+        }
+    }
+
     // ── 6. Verify and Jump into LauncherMain ───────────────────────────────
     static constexpr uint32_t LAUNCHER_MAIN_GVA = 0x83214180u;
     PPCFunc* launcherMain = g_memory.FindFunction(LAUNCHER_MAIN_GVA);

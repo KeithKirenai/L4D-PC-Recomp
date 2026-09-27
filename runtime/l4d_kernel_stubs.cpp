@@ -7,6 +7,7 @@
 #include "l4d_pch.h"
 #include "l4d_unified_dispatch.h"
 #include "l4d_kernel_stubs.h"
+#include "l4d_cross_module_links.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -78,27 +79,27 @@ extern PPCFuncMapping Server_360_PPCFuncMappings[];
 extern PPCFuncMapping AppInstaller_360_PPCFuncMappings[];
 
 static L4DModule g_l4dModuleTable[] = {
-    { "default.xex",              0x82010000, default_xex_PPCFuncMappings          },
-    { "tier0_360.dll",            0x82790000, tier0_360_PPCFuncMappings             },
-    { "vstdlib_360.dll",          0x82990000, vstdlib_360_PPCFuncMappings           },
-    { "launcher_360.dll",         0x83210000, launcher_360_PPCFuncMappings          },
-    { "filesystem_stdio_360.dll", 0x82B90000, FileSystem_Stdio_360_PPCFuncMappings  },
-    { "inputsystem_360.dll",      0x83090000, inputsystem_360_PPCFuncMappings       },
-    { "vphysics_360.dll",         0x82220000, vphysics_360_PPCFuncMappings          },
-    { "materialsystem_360.dll",   0x843A0000, MaterialSystem_360_PPCFuncMappings    },
-    { "shaderapidx9_360.dll",     0x84CB0000, shaderapidx9_360_PPCFuncMappings      },
-    { "stdshader_dx9_360.dll",    0x857A0000, stdshader_dx9_360_PPCFuncMappings     },
-    { "studiorender_360.dll",     0x85C10000, StudioRender_360_PPCFuncMappings      },
-    { "datacache_360.dll",        0x82E10000, datacache_360_PPCFuncMappings         },
-    { "soundemittersystem_360.dll",0x83410000,SoundEmitterSystem_360_PPCFuncMappings},
-    { "scenefilecache_360.dll",   0x83610000, SceneFileCache_360_PPCFuncMappings    },
-    { "vgui2_360.dll",            0x83790000, vgui2_360_PPCFuncMappings             },
-    { "vguimatsurface_360.dll",   0x848A0000, vguimatsurface_360_PPCFuncMappings    },
-    { "gameui_360.dll",           0x83BE0000, GameUI_360_PPCFuncMappings            },
-    { "engine_360.dll",           0x86410000, engine_360_PPCFuncMappings            },
-    { "client_360.dll",           0x87A90000, Client_360_PPCFuncMappings            },
-    { "server_360.dll",           0x89130000, Server_360_PPCFuncMappings            },
-    { "appinstaller_360.dll",     0x8A870000, AppInstaller_360_PPCFuncMappings      },
+    { "default.xex",              0x82000000, default_xex_PPCFuncMappings          },
+    { "tier0_360.dll",            0x82780000, tier0_360_PPCFuncMappings             },
+    { "vstdlib_360.dll",          0x82980000, vstdlib_360_PPCFuncMappings           },
+    { "launcher_360.dll",         0x83200000, launcher_360_PPCFuncMappings          },
+    { "filesystem_stdio_360.dll", 0x82B80000, FileSystem_Stdio_360_PPCFuncMappings  },
+    { "inputsystem_360.dll",      0x83080000, inputsystem_360_PPCFuncMappings       },
+    { "vphysics_360.dll",         0x82200000, vphysics_360_PPCFuncMappings          },
+    { "materialsystem_360.dll",   0x84380000, MaterialSystem_360_PPCFuncMappings    },
+    { "shaderapidx9_360.dll",     0x84C80000, shaderapidx9_360_PPCFuncMappings      },
+    { "stdshader_dx9_360.dll",    0x85780000, stdshader_dx9_360_PPCFuncMappings     },
+    { "studiorender_360.dll",     0x85C00000, StudioRender_360_PPCFuncMappings      },
+    { "datacache_360.dll",        0x82E00000, datacache_360_PPCFuncMappings         },
+    { "soundemittersystem_360.dll",0x83400000,SoundEmitterSystem_360_PPCFuncMappings},
+    { "scenefilecache_360.dll",   0x83600000, SceneFileCache_360_PPCFuncMappings    },
+    { "vgui2_360.dll",            0x83780000, vgui2_360_PPCFuncMappings             },
+    { "vguimatsurface_360.dll",   0x84880000, vguimatsurface_360_PPCFuncMappings    },
+    { "gameui_360.dll",           0x83B80000, GameUI_360_PPCFuncMappings            },
+    { "engine_360.dll",           0x86380000, engine_360_PPCFuncMappings            },
+    { "client_360.dll",           0x87980000, Client_360_PPCFuncMappings            },
+    { "server_360.dll",           0x89000000, Server_360_PPCFuncMappings            },
+    { "appinstaller_360.dll",     0x8A800000, AppInstaller_360_PPCFuncMappings      },
     { nullptr, 0, nullptr }
 };
 
@@ -143,8 +144,8 @@ static constexpr uint32_t STATUS_NOT_FOUND          = 0xC0000225u;
 #ifdef STATUS_NO_SUCH_FILE
 #undef STATUS_NO_SUCH_FILE
 #endif
-static constexpr uint32_t STATUS_NO_SUCH_FILE       = 0xC000000Fu;
 static constexpr uint32_t STATUS_DLL_NOT_FOUND      = 0xC0000135u;
+static constexpr uint32_t STATUS_NO_SUCH_FILE       = 0xC000000Fu;
 
 // ---------------------------------------------------------------------------
 // XexLoadImage
@@ -198,19 +199,27 @@ PPC_FUNC_IMPL(__imp__XexGetProcedureAddress)
         return;
     }
 
-    // Handle well-known exports
-    // launcher_360.dll: Ordinal 1 is LauncherMain @ 0x83214180
-    if (mod->imageBase == 0x83210000 && (ordinal == 1 || ordinal == 0x83214180)) {
-        printf("[XexGetProcedureAddress] mod=%s ordinal=%u -> LauncherMain @ 0x83214180\n",
-               mod->name, ordinal);
-        if (outGva) WriteGuestU32(base, outGva, 0x83214180u);
+    // First consult the global module exports table generated from PE export directories
+    uint32_t targetGva = L4D_GetModuleExport(handle, ordinal);
+    if (targetGva != 0) {
+        printf("[XexGetProcedureAddress] mod=%s ordinal=%u -> export GVA 0x%08X\n",
+               mod->name, ordinal, targetGva);
+        if (outGva) WriteGuestU32(base, outGva, targetGva);
         ctx.r3.u64 = STATUS_SUCCESS;
         return;
     }
 
-    // All cross-module calls are already dispatch-table-resolved.
-    // Return 0 (not found) for unknown ordinals — callers check before use.
-    printf("[XexGetProcedureAddress] mod=%s ordinal=0x%08X -> returning 0\n",
+    // Direct address pass-through fallback if ordinal is an actual guest VA in range
+    if (ordinal >= 0x82000000u && ordinal < 0x8B000000u) {
+        printf("[XexGetProcedureAddress] mod=%s ordinal=0x%08X (direct VA)\n",
+               mod->name, ordinal);
+        if (outGva) WriteGuestU32(base, outGva, ordinal);
+        ctx.r3.u64 = STATUS_SUCCESS;
+        return;
+    }
+
+    // Not found in export table
+    printf("[XexGetProcedureAddress] mod=%s ordinal=%u -> not found\n",
            mod->name, ordinal);
     if (outGva) WriteGuestU32(base, outGva, 0);
     ctx.r3.u64 = STATUS_SUCCESS;

@@ -7,3 +7,6 @@
 // Resolves all cross-module imports across all 21 Xbox 360 modules,
 // populates guest memory IAT entries, and updates g_l4dGlobalDispatchTable.
 void L4D_SetupCrossModuleLinks(uint8_t* guestBase);
+
+// Resolves an exported symbol address for a module by its load base and ordinal
+uint32_t L4D_GetModuleExport(uint32_t handle, uint32_t ordinal);
